@@ -1,0 +1,80 @@
+import streamlit 
+import openai
+import streamlit_authenticator as stauth
+
+# --- Setup credentials directly (plain text for demo purposes) ---
+credentials = {
+    "usernames": {
+        "student@example.com": {
+            "name": "Student User",
+            "password": "pass123"
+        }
+    }
+}
+
+authenticator = stauth.Authenticate(
+    credentials,
+    "ai_tutor_cookie",
+    "abcdef",
+    cookie_expiry_days=30
+)
+
+# --- Authentication UI in sidebar ---
+name, auth_status, username = authenticator.login("Login", location="sidebar")
+
+
+# --- Styling ---
+st.markdown("""
+    <style>
+    .stApp {
+        background-color: #f0f2f6;
+        font-family: 'Segoe UI', sans-serif;
+    }
+    .main-title {
+        font-size: 2.2em;
+        font-weight: bold;
+        color: #004080;
+    }
+    .response-box {
+        background-color: #ffffff;
+        border-radius: 10px;
+        padding: 15px;
+        box-shadow: 0px 2px 10px rgba(0,0,0,0.1);
+        margin-top: 20px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- Main App Logic ---
+if auth_status:
+    st.markdown('<div class="main-title">🌍 AI-powered Virtual Tutor</div>', unsafe_allow_html=True)
+
+    api_key = st.text_input("🔐 Enter your OpenAI API key", type="password")
+
+    if api_key:
+        openai.api_key = api_key
+        question = st.text_input("✏️ Ask your tutor anything:")
+
+        if question:
+            try:
+                response = openai.ChatCompletion.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful and friendly virtual tutor for high school students."},
+                        {"role": "user", "content": question}
+                    ],
+                    max_tokens=300,
+                    temperature=0.7
+                )
+                answer = response.choices[0].message.content
+                st.markdown(f'<div class="response-box"><b>Tutor says:</b><br>{answer}</div>', unsafe_allow_html=True)
+
+            except openai.error.OpenAIError as e:
+                st.error(f"OpenAI Error: {e}")
+    else:
+        st.info("Enter your API key to start chatting.")
+
+elif auth_status is False:
+    st.error("❌ Incorrect username or password.")
+elif auth_status is None:
+    st.warning("Please log in to continue.")

@@ -1,0 +1,149 @@
+http://localhost:8501/
+http://localhost:8501/
+http://localhost:8501/
+http://localhost:8501/
+http://localhost:8501/
+import streamlit as st
+from authlib.integrations.requests_client import OAuth2Session
+
+st.set_page_config(page_title="AI Tutor with Google Login", page_icon=":mortar_board:")
+
+# --- Google OAuth Config ---
+GOOGLE_CLIENT_ID = "186383083759-josj0s721s0q0fvopg7q3i9m6194tr94.apps.googleusercontent.com"  
+GOOGLE_CLIENT_SECRET = "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"  
+REDIRECT_URI = "http://localhost:8501/"  
+
+# OAuth endpoints
+AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
+TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo"
+
+if "token" not in st.session_state:
+    st.session_state.token = None
+if "user_info" not in st.session_state:
+    st.session_state.user_info = None
+if "oauth_state" not in st.session_state:
+    st.session_state.oauth_state = None
+
+def login():
+    oauth = OAuth2Session(
+        GOOGLE_CLIENT_ID,
+        GOOGLE_CLIENT_SECRET,
+        scope="openid email profile",
+        redirect_uri=REDIRECT_URI
+    )
+    authorization_url, state = oauth.create_authorization_url(AUTHORIZATION_ENDPOINT)
+    st.session_state.oauth_state = state
+    st.markdown(f"[Login with Google]({authorization_url})")
+
+def fetch_token():
+    query_params = st.query_params
+    if "code" in query_params and "state" in query_params:
+        # Validate the state matches
+        state = query_params.get("state", [None])[0]
+        if state != st.session_state.oauth_state:
+            st.error("Invalid OAuth state, please try again.")
+            return None
+        oauth = OAuth2Session(
+            GOOGLE_CLIENT_ID,
+            GOOGLE_CLIENT_SECRET,
+            scope="openid email profile",
+            redirect_uri=REDIRECT_URI,
+            state=state
+        )
+        try:
+            token = oauth.fetch_token(
+                TOKEN_ENDPOINT,
+                code=query_params["code"][0],
+                client_secret=GOOGLE_CLIENT_SECRET,
+            )
+            st.session_state.token = token
+            # Clean URL params after login
+            st.experimental_set_query_params()
+            st.experimental_rerun()  # rerun to update state immediately
+        except Exception as e:
+            st.error(f"Error fetching token: {e}")
+    return None
+
+def get_user_info(token):
+    if token:
+        oauth = OAuth2Session(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, token=token)
+        try:
+            resp = oauth.get(USERINFO_ENDPOINT)
+            user_info = resp.json()
+            return user_info
+        except Exception as e:
+            st.error(f"Error getting user info: {e}")
+    return None
+
+def logout():
+    st.session_state.token = None
+    st.session_state.user_info = None
+    st.session_state.oauth_state = None
+    st.experimental_rerun()  # immediately reset app UI
+
+def main():
+    st.title("AI-powered Virtual Tutor")
+
+    if st.session_state.token is None:
+        st.write("Please login to continue:")
+        login()
+        fetch_token()  # try to fetch token if redirected
+    else:
+        if st.session_state.user_info is None:
+            user_info = get_user_info(st.session_state.token)
+            if user_info:
+                st.session_state.user_info = user_info
+            else:
+                st.error("Failed to fetch user info, please log out and try again.")
+                if st.button("Logout"):
+                    logout()
+                return
+
+        if st.session_state.user_info:
+            st.success(f"Welcome, {st.session_state.user_info.get('name', 'User')}!")
+            if st.button("Logout"):
+                logout()
+
+            api_key = st.text_input("Enter your OpenAI API key", type="password")
+            if api_key:
+                from openai import OpenAI
+                client = OpenAI(api_key=api_key)
+
+                if "chat_history" not in st.session_state:
+                    st.session_state.chat_history = []
+
+                user_input = st.text_input("Ask your tutor anything:")
+
+                if user_input:
+                    try:
+                        response = client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=[
+                                {"role": "system", "content": "You are a helpful virtual tutor."},
+                                *st.session_state.chat_history,
+                                {"role": "user", "content": user_input}
+                            ],
+                            max_tokens=300,
+                            temperature=0.7,
+                        )
+                        answer = response.choices[0].message.content
+                        st.session_state.chat_history.append({"role": "user", "content": user_input})
+                        st.session_state.chat_history.append({"role": "assistant", "content": answer})
+                        st.markdown(f"**Tutor:** {answer}")
+                    except Exception as e:
+                        st.error(f"API error: {e}")
+
+                if st.session_state.chat_history:
+                    st.markdown("---")
+                    st.subheader("Chat History")
+                    for i in range(0, len(st.session_state.chat_history), 2):
+                        user_msg = st.session_state.chat_history[i]["content"]
+                        assistant_msg = st.session_state.chat_history[i + 1]["content"] if i + 1 < len(st.session_state.chat_history) else ""
+                        st.markdown(f"**You:** {user_msg}")
+                        st.markdown(f"**Tutor:** {assistant_msg}")
+        else:
+            st.info("Fetching user info...")
+
+if __name__ == "__main__":
+    main()
